@@ -1,0 +1,176 @@
+#!/usr/bin/env python
+
+import pandas, numpy, os, re, shutil, csv
+import matplotlib.pyplot as plt
+from sklearn.cluster import KMeans
+from sklearn import metrics
+from scipy.spatial.distance import cdist
+from copy import deepcopy
+
+# Euclidean Distance Caculator
+def dist(a, b, ax=1):
+    return numpy.linalg.norm(a - b, axis=ax)
+
+filename = input("Please provide the path to your clinical data file:")
+print('Reading in clinical data file to dataframe array')
+
+#generate pandas dataframe from clinical data file and add new columns for averages and stdev
+clinicaldata = pandas.read_csv(filename, sep="\t")
+clinicaldata['averages'] = 0
+clinicaldata['std'] = 0
+
+print('Calculating and appending average diversity score with standard deviation to clinical_data file')
+
+#loop through files in diversityScores directory
+for files in os.listdir('inputfiles/diversityScores'):
+    filepath = os.path.join('inputfiles/diversityScores', files)
+
+    #Generate numpy dataset from diversity score file
+    dsdata = numpy.loadtxt(filepath, delimiter="\n")
+
+    #Calculate mean and stdev from numpy numerical dataframe
+    dsmean = numpy.mean(dsdata)
+    dsstd = numpy.std(dsdata)
+
+    #Extract animal name and use to search 'code_names' for matching rows, append the avg and std values
+    animal = re.split("[.]",files)[0]
+    clinicaldata.loc[clinicaldata['code_name'].str.contains(animal), 'averages'] = dsmean
+    clinicaldata.loc[clinicaldata['code_name'].str.contains(animal), 'std'] = dsstd
+
+#Saving appended clinical data to new file clinical_data.stats.txt
+clinicaldata.to_csv(r'clinical_data.stats.txt', header=None, index=None, sep='\t', mode='w')
+
+print('Extracting highest(2) and lowest(1) species diversity and plotting distance data (scatterplots)')
+#Generate new dataframe from just the two highest and one lowest average diversity score animals
+largest = clinicaldata.nlargest(2, 'averages')
+smallest = clinicaldata.nsmallest(1, 'averages')
+joint = largest.append(smallest, ignore_index=True)
+plots = joint['code_name']
+
+#Generate new directory (if it does not already exist) for the relevant plot files
+newdir = ("plotFiles")
+check_folder = os.path.isdir(newdir)
+
+if not check_folder:
+    os.makedirs(newdir)
+
+#Loop through distanceFiles directory to find relevant files
+for i in plots:
+    for files in os.listdir('inputfiles/distanceFiles'):
+        filepath = os.path.join('inputfiles/distanceFiles', files)
+        if i in filepath:
+            newpath = os.path.join('plotFiles', files)
+            shutil.copy(filepath, newpath)
+
+#Loop through files in new plotFiles directory to generate plots
+for files in os.listdir('plotFiles'):
+    filepath = os.path.join('plotFiles', files)
+    filename = re.split("[.]",files)[0]
+    plotname = filename + '.png'
+    plottitle = filename + ' distance data scatterplot'
+
+    #Generate numpy dataset from diversity score file
+    dista = numpy.loadtxt(filepath, delimiter=",")
+
+    usercolor = input("What color would you like for the " + filename + " graph?[please use matplotlib accepatble color code]")
+
+    #Generate scatter plot from dista numpy array
+    marker_size = 10
+    plt.plot()
+    plt.scatter(dista[:,0], dista[:,1], marker_size, c=usercolor)
+    plt.title(plottitle)
+    plt.savefig(plotname)
+    plt.clf()
+
+    #Extra credit: perform k-means on the 3 plots and color them by cluster
+    #Use the elbow method to find the appropriate number of clusters
+
+    # create new plot and data
+    plt.plot()
+    X = numpy.array(list(zip(dista[:,0], dista[:,1]))).reshape(len(dista[:,0]), 2)
+    colors = ['b', 'g', 'r']
+    markers = ['o', 'v', 's']
+
+    print('Generating optimal k graph with the elbow method for species: ' + str(filename))
+    # k means determine k
+    distortions = []
+    K = range(1,10)
+    for k in K:
+        kmeanModel = KMeans(n_clusters=k).fit(X)
+        kmeanModel.fit(X)
+        distortions.append(sum(numpy.min(cdist(X, kmeanModel.cluster_centers_, 'euclidean'), axis=1)) / X.shape[0])
+    
+    #Generating a pandas dataframe from elbow graph x,y values
+    df = pandas.DataFrame([distortions])
+    df_trans = df.T
+    eucarray = pandas.DataFrame({'x':[1,2,3,4,5,6,7,8,9]})
+    eucarray['y'] = df_trans
+
+    #calculating the slope and difference in slope to find the maximum change (elbow)
+    eucdiff = eucarray.diff()
+    eucdiff2 = eucdiff.diff()
+    slopediff = eucdiff2['y']
+    max_val = slopediff.max()
+
+    #for case of 'missing' elbow, set k value to 1
+    if max_val < 1:
+        k = 1
+    else:
+        k = slopediff.argmax()
+
+    kfile = filename + '_elbow.png'
+    # Plot the elbow
+    plt.plot(K, distortions, 'bx-')
+    plt.xlabel('k')
+    plt.ylabel('Distortion')
+    plt.title('The Elbow Method showing the optimal k')
+    plt.savefig(kfile)
+    plt.clf()
+
+    print('Generating K Means plots')
+
+    # X coordinates of random centroids
+    C_x = numpy.random.randint(0, numpy.max(dista), size=k)
+
+    # Y coordinates of random centroids
+    C_y = numpy.random.randint(0, numpy.max(dista), size=k)
+    C = numpy.array(list(zip(C_x, C_y)), dtype=numpy.float32)
+    
+    # To store the value of centroids when it updates
+    C_old = numpy.zeros(C.shape)
+
+    # Cluster Lables(0, 1, 2)
+    clusters = numpy.zeros(len(dista))
+
+    # Error func. - Distance between new centroids and old centroids
+    error = dist(C, C_old, None)
+
+    # Loop will run till the error becomes zero
+    while error != 0:
+        # Assigning each value to its closest cluster
+        for i in range(len(dista)):
+            distances = dist(dista[i], C)
+            cluster = numpy.argmin(distances)
+            clusters[i] = cluster
+        # Storing the old centroid values
+        C_old = deepcopy(C)
+        # Finding the new centroids by taking the average value
+        for i in range(k):
+            points = [dista[j] for j in range(len(dista)) if clusters[j] == i]
+            C[i] = numpy.mean(points, axis=0)
+        error = dist(C, C_old, None)
+
+    colors = ['r', 'g', 'b', 'y', 'c', 'm']
+    fig, ax = plt.subplots()
+    for i in range(k):
+        points = numpy.array([dista[j] for j in range(len(dista)) if clusters[j] == i])
+        ax.scatter(points[:, 0], points[:, 1], s=7, c=colors[i])
+    ax.scatter(C[:, 0], C[:, 1], marker='*', s=200, c='#050505')
+
+    title = filename + 'K Means Clustered Distribution'
+    plt.title(title)
+    kfilename = filename + '_kmean.png'
+    plt.savefig(kfilename)
+    plt.clf()
+
+print('Program complete. Please refer to:\nclinical_data.stats.txt for appended values\n(animal).png graphs for primary scatterplots\n(animal)_elbow.png for kmeans determination\n(animal)_kmean.png for kmean clustered plots')
