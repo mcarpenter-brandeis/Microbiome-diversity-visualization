@@ -1,4 +1,4 @@
-# Sample-visualizations
+# Microbiome taxonomic diversity visualization
 
 #Author: Meredith Carpenter
 #Assignment 5, Week 10
